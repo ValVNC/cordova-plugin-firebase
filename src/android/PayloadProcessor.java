@@ -192,6 +192,12 @@ public class PayloadProcessor {
             final String folderId = notification.folderId;
             final String title = notification.title;
             final String body = notification.body;
+            final String updateMsgType = notification.updateMsgType;
+
+            if (!TextUtils.isEmpty(updateMsgType)) {
+                NotificationManager.hideMailNotificationsForMid(appContext, mid);
+                return;
+            }
 
             if (FirebasePlugin.inBackground()) {
                 notificationPool.execute(new Runnable() {

@@ -12,6 +12,7 @@ public class PayloadMail {
     public String folderId;
     public String title;
     public String body;
+    public String updateMsgType;
 
     public String getFromAddress() {
         return fromAddress;
