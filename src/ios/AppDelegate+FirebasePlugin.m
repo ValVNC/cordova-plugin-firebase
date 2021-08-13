@@ -215,6 +215,10 @@
         [FirebaseActionsManager handleMarkMessageAsReadAction:mutableUserInfo];
         
         isChatAction = YES;
+    } else if ([actionIdentifier isEqual:@"MUTE_CHAT_ACTION"]){
+        [FirebaseActionsManager handleMuteChatAction:mutableUserInfo];
+        
+        isChatAction = YES;
     }
 
     // if this is a reject action -> do not pass a 'onNotificationOpen' event to JS
