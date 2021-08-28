@@ -11,6 +11,7 @@ import org.apache.cordova.firebase.models.PayloadMail;
 import org.apache.cordova.firebase.models.PayloadCalendar;
 import org.apache.cordova.firebase.utils.WidgetNotifier;
 import org.apache.cordova.firebase.utils.FcmLoggerUtils;
+import org.apache.cordova.firebase.utils.JSLoader;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import android.content.Context;
@@ -61,6 +62,7 @@ public class PayloadProcessor {
               final String jitsiRoom = notification.jitsiRoom;
               final String jitsiUrl = notification.jitsiURL;
               final List<String> mention = notification.mention;
+              final boolean isSyncpush = notification.syncpush;
 
               FcmLoggerUtils.logFcmReceived(appContext, msgid);
 
@@ -72,6 +74,10 @@ public class PayloadProcessor {
               if (FirebasePlugin.inBackground()) {
                 notificationPool.execute(new Runnable() {
                     public void run() {
+                        if (isSyncpush) {
+                            JSLoader.syncMessages(appContext);
+                        }
+
                         if (notification.isCallNotification()) {
                             NotificationManager.displayTalkCallNotification(activityOrServiceContext, appContext, msgid,
                                 eventType, target, username, groupName, message, nsound, initistor, receiver, timeStamp, jitsiRoom, jitsiUrl);

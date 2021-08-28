@@ -21,6 +21,7 @@ public class PayloadTalk {
     public long t;
     public String jitsiURL;
     public String jitsiRoom;
+    public boolean syncpush;
 
     public String getMsgid() {
         return msgid;

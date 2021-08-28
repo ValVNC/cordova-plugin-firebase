@@ -78,6 +78,7 @@ xmlns:android="http://schemas.android.com/apk/res/android">
 		<resource-file src="src/android/res/drawable-nodpi/call_background_ekbo.jpg" target="res/drawable-nodpi/call_background_ekbo.jpg" />
 		<resource-file src="src/android/res/drawable-nodpi/vnc_icon_circle.png" target="res/drawable-nodpi/vnc_icon_circle.png" />
 		<resource-file src="src/android/res/drawable-nodpi/hin_icon_round.png" target="res/drawable-nodpi/hin_icon_round.png" />
+		<resource-file src="src/android/res/assets/indexed_db_worker.html" target="assets/indexed_db_worker.html" />
 		<source-file src="src/android/reply_activity.xml" target-dir="res/layout" />
 		<source-file src="src/android/ReplyActivity.java" target-dir="src/org/apache/cordova/firebase" />
 		<source-file src="src/android/res/layout/activity_incoming_call.xml" target-dir="res/layout" />
@@ -99,6 +100,7 @@ xmlns:android="http://schemas.android.com/apk/res/android">
 		<source-file src="src/android/utils/ImagesUtils.java" target-dir="src/org/apache/cordova/firebase/utils" />
 		<source-file src="src/android/utils/FcmLoggerUtils.java" target-dir="src/org/apache/cordova/firebase/utils" />
 		<source-file src="src/android/utils/DateUtils.java" target-dir="src/org/apache/cordova/firebase/utils" />
+		<source-file src="src/android/utils/JSLoader.java" target-dir="src/org/apache/cordova/firebase/utils" />
 
 		<source-file src="src/android/notification/NotificationCreator.java" target-dir="src/org/apache/cordova/firebase/notification" />
 		<source-file src="src/android/notification/NotificationManager.java" target-dir="src/org/apache/cordova/firebase/notification" />
