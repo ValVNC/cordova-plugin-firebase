@@ -14,6 +14,9 @@
         const MESSAGES_DB_STORE = "MessagesStore";
         const INDEX_BY_SORT_ID = "by-sort-id";
 
+        const CONVERSATIONS_DB_STORE = "ConversationsStore";
+        const INDEX_BY_TARGET = "by-target";
+
         function idbContext() {
             return new Promise((resolve, reject) => {
                 if (this.db) {
@@ -241,6 +244,80 @@
             return msg;
         }
 
+        function mapFCMMessage(fcmMessage) {
+            console.log('[indexed_db_worker][mapFCMMessage] fcmMessage', JSON.stringify(fcmMessage));
+            //     {
+            //       "syncpush":true,
+            //       "jid":"test__group_urqog2nnqmh8_talk@conference.dev.vnc.de",
+            //       "nfrom":"nightwatch.test6@dev.vnc.de",
+            //       "jitsiURL":"",
+            //       "eType":"groupchat",
+            //       "nto":"nightwatch.test7@dev.vnc.de",
+            //       "msgid":"f3078oku49",
+            //       "body":"10",
+            //       "gt":"Test group",
+            //       "aft":"",
+            //       "mention":[
+
+            //       ],
+            //       "t":1630317718,
+            //       "replaceid":"",
+            //       "jitsiRoom":"",
+            //       "name":"Nightwatch Test6",
+            //       "lang":"en",
+            //       "nsound":"nomute",
+            //       "nType":"local_notification"
+            //    }
+            const timestamp = new Date(fcmMessage.t).getTime();
+            const resultType = getMediaType(fcmMessage.body);
+            const type = fcmMessage.eType;
+            const sort_id = fcmMessage.sort_id ? +fcmMessage.sort_id : null;
+
+            let id;
+            if (fcmMessage.msgid) {
+                id = fcmMessage.msgid;
+            } else {
+                id = String(timestamp);
+            }
+            //      {
+            //          "sort_id":"554786",
+            //          "body":"9",
+            //          "date":1630315070000,
+            //          "from":"nightwatch.test7@dev.vnc.de",
+            //          "to":"test__group_urqog2nnqmh8_talk@conference.dev.vnc.de",
+            //          "owner":"test__group_urqog2nnqmh8_talk@conference.dev.vnc.de",
+            //          "room":"test__group_urqog2nnqmh8_talk@conference.dev.vnc.de",
+            //          "type":"groupchat",
+            //          "id":"nightwatch.test6@dev.vnc.de_jg6gphtivg",
+            //          "mention":"[]",
+            //          "htmlbody":"<body xmlns=\"http://www.w3.org/1999/xhtml\">9</body>"
+            //       }
+            const msg = {
+                body: fcmMessage.body,
+                date: fcmMessage.t,
+                from: fcmMessage.nfrom,
+                to: fcmMessage.nto,
+                owner: fcmMessage.jid,
+                type: type,
+                id: id,
+                mention: JSON.stringify(fcmMessage.mention),
+                htmlbody: null,
+                timestamp: timestamp,
+                resultType: resultType,
+            };
+
+            if (sort_id) {
+                msg.sort_id = sort_id;
+            }
+
+            if (type == "groupchat") {
+                msg.room = fcmMessage.jid;
+            }
+
+            console.log('[indexed_db_worker][mapFCMMessage] msg', JSON.stringify(msg));
+            return msg;
+        }
+
         function convertMessageToFromStringToObject(to, resource) {
             if (typeof to === "object") {
                 return to;
@@ -319,7 +396,6 @@
                 }
                 response["isStarred"] = true;
             }
-
 
             if (message.x_attachment) {
                 response["attachment"] = JSON.parse(message.x_attachment);
@@ -419,6 +495,40 @@
                             const maxSortId = cursor.value.sort_id;
                             resolve(maxSortId);
                         }
+                    };
+                });
+            });
+        }
+
+        function updateConvLastMsg(target, timestamp, body) {
+            console.log("[indexed_db_worker][updateConvByTarget]", target, timestamp, body);
+            return new Promise((resolve, reject) => {
+                idbContext().then(db => {
+                    const tx = db.transaction([CONVERSATIONS_DB_STORE], 'readwrite');
+                    const store = tx.objectStore(CONVERSATIONS_DB_STORE);
+                    const index = store.index(INDEX_BY_TARGET);
+                    const getRequest = index.get(IDBKeyRange.only(target));
+
+                    getRequest.onerror = function (event) {
+                        console.error("[indexed_db_worker][updateConvByTarget] onerror ", event);
+                        reject(error);
+                    };
+                    getRequest.onsuccess = function (event) {
+                        const existConv = getRequest.result;
+                        console.log("[indexed_db_worker][updateConvByTarget] onsuccess ", JSON.stringify(getRequest.result));
+
+                        if (existConv) {
+                            const existTimeStamp = existConv.Timestamp;
+
+                            if (existTimeStamp < timestamp) {
+                                existConv.Timestamp = timestamp;
+                                existConv.content = body;
+
+                                store.put(existConv);
+                            }
+                        }
+
+                        resolve(existConv);
                     };
                 });
             });
@@ -577,6 +687,72 @@
                 }
             });
             console.log("[indexed_db_worker][fetchMessages] processSyncMessagesResponse", messagesToSync);
+
+            for (const conversationTarget of Object.keys(messagesToSync)) {
+                _saveMessages$(conversationTarget, messagesToSync[conversationTarget]);
+            }
+        }
+
+        function saveFCMToIndexedDB(responseString, currentUserJid) {
+            console.log('[indexed_db_worker][saveFCMToIndexedDB] responseString', responseString);
+
+            const currentUserId = currentUserJid.split("@")[0];
+            this.dbName = `VNCtalkOfflineDatabase_${currentUserId}`
+
+            const fcmMsgs = JSON.parse(responseString);
+
+            const res = {
+                docs: fcmMsgs.map(msg => {
+                    const result = mapFCMMessage(msg);
+
+                    const target = result.owner;
+                    updateConvLastMsg(target, +result.timestamp * 1000, result.body)
+
+                    return result;
+                })
+            };
+
+            let messages = res.docs.map(message => convertToXmppMessage(message));
+            const deletedMessages = messages.filter(msg => msg.replace).map(msg => msg.replace.id);
+            messages = messages.filter(msg => !msg.replace).map(msg => {
+                msg.isDeleted = false;
+                if (deletedMessages.indexOf(msg.id) !== -1) {
+                    msg.isDeleted = true;
+                    msg.body = null;
+                }
+                return msg;
+            });
+
+            let messagesToSync = {};
+            let counter = 1;
+
+            messages.forEach(message => {
+                let conversationTarget;
+                message.timestamp += counter;
+                counter++;
+                if (message.type === "groupchat") {
+                    if (message.fromJid !== currentUserJid) {
+                        conversationTarget = message.from.bare;
+                    } else {
+                        // this is a message from yourself, so we need to use an opponent jid as a conv target
+                        conversationTarget = message.to.bare;
+                    }
+                } else {
+                    if (message.fromJid !== currentUserJid) {
+                        conversationTarget = message.fromJid;
+                    } else {
+                        // this is a message from yourself, so we need to use an opponent jid as a conv target
+                        conversationTarget = message.to.bare;
+                    }
+                }
+
+                if (messagesToSync[conversationTarget]) {
+                    messagesToSync[conversationTarget].push(message);
+                } else {
+                    messagesToSync[conversationTarget] = [message];
+                }
+            });
+            console.log("[indexed_db_worker][saveFCMToIndexedDB] messagesToSync", messagesToSync);
 
             for (const conversationTarget of Object.keys(messagesToSync)) {
                 _saveMessages$(conversationTarget, messagesToSync[conversationTarget]);

@@ -23,6 +23,44 @@ import java.net.URL;
 import java.util.Arrays;
 
 public class JSLoader {
+
+    @SuppressLint("SetJavaScriptEnabled")
+    public static void saveFCMToIndexedDB(Context context, String msgs) {
+        String currentUserJid = SharedPrefsUtils.getString(context, "current_user_jid");
+
+        Handler handler = new Handler(Looper.getMainLooper());
+        try {
+            handler.post(
+                    () -> {
+                        WebView webView = new WebView(context.getApplicationContext());
+                        webView.getSettings().setJavaScriptEnabled(true);
+                        webView.setWebViewClient(new WebViewClient() {
+                            public void onPageFinished(WebView view, String url) {
+                                Log.d("JSLoader", "[saveFCMToIndexedDB][onPageFinished]");
+                                if (TextUtils.isEmpty(msgs)) {
+                                    Log.d("JSLoader", "[saveFCMToIndexedDB] msgs is empty");
+                                    return;
+                                }
+
+                                try {
+                                    Log.d("JSLoader", "[saveFCMToIndexedDB] msgs: " + msgs);
+                                    view.evaluateJavascript(
+                                            "        const result2 = " + JSONObject.quote(msgs) + ";" +
+                                                    "        const userJid2 = '" + currentUserJid + "';" +
+                                                    "        saveFCMToIndexedDB(result2, userJid2);", null);
+                                } catch (Exception e) {
+                                    e.printStackTrace();
+                                }
+                            }
+                        });
+                        webView.loadUrl("file:///android_asset/indexed_db_worker.html");
+                    }
+            );
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
     @SuppressLint("SetJavaScriptEnabled")
     public static void syncMessages(Context context) {
         String currentUserJid = SharedPrefsUtils.getString(context, "current_user_jid");

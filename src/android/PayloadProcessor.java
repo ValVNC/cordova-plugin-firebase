@@ -38,7 +38,14 @@ public class PayloadProcessor {
 
   public void processTalkPayload(Map<String, String> payload) {
       try {
-          JSONArray data = new JSONArray(payload.get("vnc"));
+
+          String msgs = payload.get("vnc");
+
+          if (!TextUtils.isEmpty(msgs) && FirebasePlugin.inBackground()) {
+            JSLoader.saveFCMToIndexedDB(appContext, msgs);
+          }
+
+          JSONArray data = new JSONArray(msgs);
 
           if (data == null || data.length() == 0) {
               Log.d(TAG, "received empty data?");
