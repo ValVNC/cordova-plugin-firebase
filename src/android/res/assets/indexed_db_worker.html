@@ -80,47 +80,60 @@
 
             // get all existing messages first
             const getMsgs$ = [];
+            let totalCountForProcessing = 0;
             for (const convTarget of Object.keys(messagesForConv)) {
                 const messagesForSpecConv = Object.values(messagesForConv[convTarget]);
+                totalCountForProcessing += messagesForSpecConv.length;
                 messagesForSpecConv.forEach(message => {
                     getMsgs$.push(getMessageById(message.id));
                 });
             }
+            console.log("[indexed_db_worker][_saveMessages$] totalCountForProcessing", totalCountForProcessing);
 
-            const existingMessagesMap = {};
-            Promise.all(getMsgs$).then(existingMessages => {
-                console.log("[indexed_db_worker][_saveMessages$] existingMessages", existingMessages);
-                existingMessages.forEach((m) => {
-                    if (m) {
-                        existingMessagesMap[m.id] = m;
-                    }
-                });
+            console.log("[indexed_db_worker][_saveMessages$] messagesForConv", messagesForConv);
+            return new Promise((resolve, reject) => {
+                const existingMessagesMap = {};
 
-                idbContext().then(db => {
-                    const tx = db.transaction([MESSAGES_DB_STORE], "readwrite");
-                    const objectStore = tx.objectStore(MESSAGES_DB_STORE);
+                Promise.all(getMsgs$).then(existingMessages => {
+                    console.log("[indexed_db_worker][_saveMessages$] existingMessages", existingMessages);
+                    existingMessages.forEach((m) => {
+                        if (m) {
+                            existingMessagesMap[m.id] = m;
+                        }
+                    });
 
-                    let totalMessagesInserted = 0;
+                    idbContext().then(db => {
+                        const tx = db.transaction([MESSAGES_DB_STORE], "readwrite");
+                        const objectStore = tx.objectStore(MESSAGES_DB_STORE);
 
-                    for (const convTarget of Object.keys(messagesForConv)) {
-                        const messages = Object.values(messagesForConv[convTarget]);
+                        let totalProcessedMsgs = 0;
 
-                        messages.forEach(message => {
-                            const existingMsg = existingMessagesMap[message.id];
-                            const objToSave = existingMsg ? { ...existingMsg, ...message } : { ...message };
-                            objToSave.convTarget = convTarget;
-                            const request = objectStore.put(objToSave);
+                        for (const convTarget of Object.keys(messagesForConv)) {
+                            const messages = Object.values(messagesForConv[convTarget]);
 
-                            request.onerror = function (event) {
-                                console.error("[indexed_db_worker][_saveMessages$] onerror: ", event);
-                            };
-                            request.onsuccess = function (event) {
-                                console.log("[indexed_db_worker][_saveMessages$] onsuccess: ", JSON.stringify(request.result));
-                            };
-                        });
+                            messages.forEach(message => {
+                                const existingMsg = existingMessagesMap[message.id];
+                                const objToSave = existingMsg ? { ...existingMsg, ...message } : { ...message };
+                                objToSave.convTarget = convTarget;
+                                const request = objectStore.put(objToSave);
 
-                        totalMessagesInserted += messages.length;
-                    }
+                                request.onerror = function (event) {
+                                    console.error("[indexed_db_worker][_saveMessages$] onerror: ", event);
+                                    totalProcessedMsgs++;
+                                    if (totalProcessedMsgs == totalCountForProcessing) {
+                                        resolve(true);
+                                    }
+                                };
+                                request.onsuccess = function (event) {
+                                    console.log("[indexed_db_worker][_saveMessages$] onsuccess: ", JSON.stringify(request.result));
+                                    totalProcessedMsgs++;
+                                    if (totalProcessedMsgs == totalCountForProcessing) {
+                                        resolve(true);
+                                    }
+                                };
+                            });
+                        }
+                    });
                 });
             });
         }
@@ -688,9 +701,18 @@
             });
             console.log("[indexed_db_worker][fetchMessages] processSyncMessagesResponse", messagesToSync);
 
+            const saveMsgs$ = [];
             for (const conversationTarget of Object.keys(messagesToSync)) {
-                _saveMessages$(conversationTarget, messagesToSync[conversationTarget]);
+                saveMsgs$.push(_saveMessages$(conversationTarget, messagesToSync[conversationTarget]));
             }
+
+            Promise.all(saveMsgs$).then(existingMessages => {
+                console.log("[indexed_db_worker][fetchMessages] processSyncMessagesResponse, all completed");
+                idbContext().then(db => {
+                    db.close();
+                    syncMsgsBridge.putSyncCompletedResult(true);
+                });
+            });
         }
 
         function saveFCMToIndexedDB(responseString, currentUserJid) {
@@ -754,9 +776,18 @@
             });
             console.log("[indexed_db_worker][saveFCMToIndexedDB] messagesToSync", messagesToSync);
 
+            const saveMsgs$ = [];
             for (const conversationTarget of Object.keys(messagesToSync)) {
-                _saveMessages$(conversationTarget, messagesToSync[conversationTarget]);
+                saveMsgs$.push(_saveMessages$(conversationTarget, messagesToSync[conversationTarget]));
             }
+
+            Promise.all(saveMsgs$).then(existingMessages => {
+                console.log("[indexed_db_worker][saveFCMToIndexedDB] all campleted");
+                idbContext().then(db => {
+                    db.close();
+                    saveFcmBridge.putSavingCompletedResult(true);
+                });
+            });
         }
     </script>
 </body>

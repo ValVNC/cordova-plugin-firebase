@@ -32,23 +32,48 @@ public class JSLoader {
         try {
             handler.post(
                     () -> {
-                        WebView webView = new WebView(context.getApplicationContext());
+                        final WebView webView = new WebView(context.getApplicationContext());
                         webView.getSettings().setJavaScriptEnabled(true);
+                        SaveFcmBridge saveFcmBridge = new SaveFcmBridge();
+                        webView.addJavascriptInterface(saveFcmBridge, "saveFcmBridge");
                         webView.setWebViewClient(new WebViewClient() {
                             public void onPageFinished(WebView view, String url) {
                                 Log.d("JSLoader", "[saveFCMToIndexedDB][onPageFinished]");
                                 if (TextUtils.isEmpty(msgs)) {
                                     Log.d("JSLoader", "[saveFCMToIndexedDB] msgs is empty");
+                                    view.destroy();
                                     return;
                                 }
 
+                                Log.d("JSLoader", "[saveFCMToIndexedDB] msgs: " + msgs);
                                 try {
-                                    Log.d("JSLoader", "[saveFCMToIndexedDB] msgs: " + msgs);
                                     view.evaluateJavascript(
                                             "        const result2 = " + JSONObject.quote(msgs) + ";" +
                                                     "        const userJid2 = '" + currentUserJid + "';" +
-                                                    "        saveFCMToIndexedDB(result2, userJid2);", null);
+                                                    "        saveFCMToIndexedDB(result2, userJid2);", result -> {
+                                                Log.d("JSLoader", "[evaluateJavascript] callback");
+                                                try {
+                                                    boolean isSavingCompleted;
+                                                    int counter = 0;
+
+                                                    do {
+                                                        Thread.sleep(100);
+
+                                                        isSavingCompleted = saveFcmBridge.isSavingCompleted();
+                                                        counter++;
+                                                    } while (!isSavingCompleted && counter < 10);
+
+                                                    Log.d("JSLoader", "[evaluateJavascript] callback, isSavingCompleted: " + isSavingCompleted);
+                                                    if (isSavingCompleted || counter == 10) {
+                                                        view.destroy();
+                                                    }
+                                                } catch (Exception e) {
+                                                    view.destroy();
+                                                    e.printStackTrace();
+                                                }
+                                            });
                                 } catch (Exception e) {
+                                    view.destroy();
                                     e.printStackTrace();
                                 }
                             }
@@ -71,40 +96,49 @@ public class JSLoader {
                     () -> {
                         WebView webView = new WebView(context.getApplicationContext());
                         webView.getSettings().setJavaScriptEnabled(true);
-                        Bridge bridge = new Bridge();
-                        webView.addJavascriptInterface(bridge, "bridge");
+                        SyncMsgsBridge syncMsgsBridge = new SyncMsgsBridge();
+                        webView.addJavascriptInterface(syncMsgsBridge, "syncMsgsBridge");
                         webView.setWebViewClient(new WebViewClient() {
                             public void onPageFinished(WebView view, String url) {
                                 Log.d("JSLoader", "[onPageFinished]");
-                                view.evaluateJavascript(
-                                        "const currentUserJid = '" + currentUserJid + "';\n" +
-                                                "console.log('Start script from Java');\n" +
-                                                "getMaxSortIdSync(currentUserJid).then(sortId => {\n" +
-                                                "    bridge.putJsResult(sortId);\n" +
-                                                "});", result -> {
-                                            Log.d("JSLoader", "[evaluateJavascript] callback");
-                                            try {
-                                                String sortIdString;
-                                                int counter = 0;
+                                try {
+                                    view.evaluateJavascript(
+                                            "const currentUserJid = '" + currentUserJid + "';\n" +
+                                                    "console.log('Start script from Java');\n" +
+                                                    "getMaxSortIdSync(currentUserJid).then(sortId => {\n" +
+                                                    "    syncMsgsBridge.putSortIdResult(sortId);\n" +
+                                                    "});", result -> {
+                                                Log.d("JSLoader", "[evaluateJavascript] callback");
+                                                try {
+                                                    String sortIdString;
+                                                    int counter = 0;
 
-                                                do {
-                                                    Thread.sleep(100);
+                                                    do {
+                                                        Thread.sleep(100);
 
-                                                    sortIdString = bridge.getJsResult();
-                                                    counter++;
-                                                } while (sortIdString == null && counter < 10);
+                                                        sortIdString = syncMsgsBridge.getSortIdResult();
+                                                        counter++;
+                                                    } while (sortIdString == null && counter < 10);
 
-                                                Log.d("JSLoader", "[onPageFinished] sortIdString " + sortIdString);
-                                                if (sortIdString != null) {
-                                                    long sortId = Long.parseLong(sortIdString);
-                                                    new SyncMessagesTask(view).execute(sortId);
+                                                    Log.d("JSLoader", "[evaluateJavascript] callback, sortIdString " + sortIdString);
+                                                    if (sortIdString != null) {
+                                                        long sortId = Long.parseLong(sortIdString);
+                                                        new SyncMessagesTask(view, syncMsgsBridge).execute(sortId);
+                                                    } else {
+                                                        view.destroy();
+                                                    }
+                                                } catch (Exception e) {
+                                                    view.destroy();
+                                                    e.printStackTrace();
                                                 }
-                                            } catch (Exception e) {
-                                                e.printStackTrace();
-                                            }
-                                        });
+                                            });
+                                } catch (Exception e) {
+                                    view.destroy();
+                                    e.printStackTrace();
+                                }
                             }
                         });
+
                         webView.loadUrl("file:///android_asset/indexed_db_worker.html");
                     }
             );
@@ -118,9 +152,12 @@ public class JSLoader {
 
         @SuppressLint("StaticFieldLeak")
         private final WebView webView;
+        private final SyncMsgsBridge syncMsgsBridge;
 
-        public SyncMessagesTask(WebView view) {
+        public SyncMessagesTask(WebView view, SyncMsgsBridge syncMsgsBridge) {
+            super();
             this.webView = view;
+            this.syncMsgsBridge = syncMsgsBridge;
         }
 
         @Override
@@ -206,6 +243,7 @@ public class JSLoader {
         protected void onPostExecute(String result) {
             if (TextUtils.isEmpty(result)) {
                 Log.i(TAG, "[onPostExecute] result is empty");
+                webView.destroy();
                 return;
             }
 
@@ -216,24 +254,70 @@ public class JSLoader {
                 this.webView.evaluateJavascript(
                         "        const result = " + JSONObject.quote(result) + ";" +
                                 "        const userJid = '" + currentUserJid + "';" +
-                                "        processSyncMessagesResponse(result, userJid);", null);
+                                "        processSyncMessagesResponse(result, userJid);", jsResult -> {
+                            Log.d("JSLoader", "[evaluateJavascript] callback");
+                            try {
+                                boolean isCompleted;
+                                int counter = 0;
+
+                                do {
+                                    Thread.sleep(100);
+
+                                    isCompleted = syncMsgsBridge.isSyncCompleted();
+                                    counter++;
+                                } while (!isCompleted && counter < 20);
+
+                                Log.d(TAG, "[onPostExecute] isCompleted: " + isCompleted);
+                                if (isCompleted || counter == 20) {
+                                    webView.destroy();
+                                }
+                            } catch (Exception e) {
+                                webView.destroy();
+                                e.printStackTrace();
+                            }
+                        });
             } catch (Exception e) {
+                webView.destroy();
                 e.printStackTrace();
             }
         }
     }
 
-    static class Bridge {
+    static class SyncMsgsBridge {
 
-        public String result = null;
+        public String sortIdResult = null;
+        public boolean syncCompleted = false;
 
         @JavascriptInterface
-        public void putJsResult(String result) {
-            this.result = result;
+        public void putSortIdResult(String result) {
+            this.sortIdResult = result;
         }
 
-        public String getJsResult() {
-            return this.result;
+        public String getSortIdResult() {
+            return this.sortIdResult;
+        }
+
+        @JavascriptInterface
+        public void putSyncCompletedResult(boolean result) {
+            this.syncCompleted = result;
+        }
+
+        public boolean isSyncCompleted() {
+            return this.syncCompleted;
+        }
+    }
+
+    static class SaveFcmBridge {
+
+        public boolean savingCompleted = false;
+
+        @JavascriptInterface
+        public void putSavingCompletedResult(boolean result) {
+            this.savingCompleted = result;
+        }
+
+        public boolean isSavingCompleted() {
+            return this.savingCompleted;
         }
     }
 }
