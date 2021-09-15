@@ -919,4 +919,14 @@ public class NotificationCreator {
 
         return result;
     }
+
+     static PendingIntent createNotifPendingIntentChannel(Context activityOrServiceContext, String title, String body, String notification, Integer notificationId) {
+        Intent intent = new Intent(activityOrServiceContext, OnNotificationOpenReceiver.class);
+        Bundle bundle = new Bundle();
+        bundle.putString("title", title );
+        bundle.putString("body", body);
+        bundle.putString("notification", notification);
+        intent.putExtras(bundle);
+        return PendingIntent.getBroadcast(activityOrServiceContext, notificationId, intent, PendingIntent.FLAG_UPDATE_CURRENT);
+    }
 }

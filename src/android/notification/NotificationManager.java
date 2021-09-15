@@ -25,6 +25,7 @@ import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Set;
+import java.util.Date;
 
 
 public class NotificationManager {
@@ -53,6 +54,8 @@ public class NotificationManager {
     private static final String CALENDAR_NOTIFICATIONS_GROUP_ID = "calendarNotificationsGroupId";
 
     private static long timeFromPrevNotify = 0;
+    private static final int CHANNEL_SUMMARY_NOTIFICATION_ID = 789;
+    private static final String CHANNEL_NOTIFICATIONS_GROUP_ID = "channelNotificationsGroupId";
 
     synchronized public static void displayMailNotification(Context activityOrServiceContext, Context appContext, String subject,
         String body, String fromDisplay, String msgId,  String type, String folderId, String sound, String fromAddress, String cId) {
@@ -854,6 +857,67 @@ public class NotificationManager {
                 LocalBroadcastManager.getInstance(context.getApplicationContext())
                 .sendBroadcast(new Intent(NotificationCreator.TALK_DELETE_CALL_NOTIFICATION).putExtra(NotificationUtils.EXTRA_CALL_ID, callId));
             }
+        }
+    }
+
+     synchronized public static void displayChannelNotification(Context activityOrServiceContext, Context appContext,
+                                                          String body, String title, String notification) {
+        Log.i(TAG, "displayChannelNotification: body: " + body + ", title: " + title + ", notification: " + notification );
+
+        android.app.NotificationManager notificationManager = (android.app.NotificationManager) activityOrServiceContext.getSystemService(Context.NOTIFICATION_SERVICE);
+
+        Date d = new Date();
+
+        Integer notificationId = String.valueOf(d.getTime()).hashCode();
+
+         // defineChannelData
+        String nsound = "";
+        String channelId = NotificationCreator.defineChannelId(activityOrServiceContext, nsound);
+        String channelName = NotificationCreator.defineChannelName(activityOrServiceContext, nsound);
+        Uri defaultSoundUri = NotificationCreator.defineSoundUri(nsound);
+
+        //create Notification PendingIntent
+        PendingIntent pendingIntent = NotificationCreator.createNotifPendingIntentChannel(activityOrServiceContext,
+                title, body, notification, notificationId);
+
+
+        NotificationCompat.Builder notificationBuilder = NotificationCreator.createNotification(activityOrServiceContext, channelId, nsound,
+                title, body, null, pendingIntent, defaultSoundUri);
+
+        NotificationCreator.setNotificationSmallIcon(activityOrServiceContext, notificationBuilder);
+        NotificationCreator.setNotificationColor(activityOrServiceContext, notificationBuilder);
+
+        Notification notificationObj = notificationBuilder.build();
+
+        Log.i(TAG, "displayChannelNotification: channelId: " + channelId + ", channelName: " + channelName + ", defaultSoundUri: " + defaultSoundUri);
+        Log.i(TAG, "displayChannelNotification: display notificationId: " + notificationId);
+
+        //
+        NotificationCreator.setNotificationImageRes(activityOrServiceContext, notificationObj);
+        NotificationCreator.createNotificationChannel(notificationManager, channelId, channelName, nsound);
+
+        notificationManager.notify(notificationId, notificationObj);
+    }
+
+    public static void hideChannelSummaryNotificationIfNeed(Context context, android.app.NotificationManager notificationManager) {
+        Log.d(TAG, "hideChannelSummaryNotificationIfNeed");
+        try {
+            StatusBarNotification[] statusBarNotifications = NotificationUtils.getStatusBarNotifications(context);
+            Log.d(TAG, "statusBarNotifications.length = " + statusBarNotifications.length);
+
+            int notificationsInGroup = 0;
+            for (StatusBarNotification statusBarNotification : statusBarNotifications){
+                String groupId = statusBarNotification.getNotification().getGroup();
+                if (CHANNEL_NOTIFICATIONS_GROUP_ID.equals(groupId)) {
+                    notificationsInGroup++;
+                }
+
+                if (notificationsInGroup > 1) return;
+            }
+
+            notificationManager.cancel(CHANNEL_SUMMARY_NOTIFICATION_ID);
+        } catch (Exception e) {
+            e.printStackTrace();
         }
     }
 }

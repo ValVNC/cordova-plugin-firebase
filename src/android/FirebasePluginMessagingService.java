@@ -82,6 +82,8 @@ public class FirebasePluginMessagingService extends FirebaseMessagingService {
             payloadProcessor.processCalendarPayload(payload);
         } else if (payload.containsKey("subject") && payload.containsKey("fromAddress")) {
             payloadProcessor.processMailPayload(payload);
+        } else if (payload.get("channels") != null) {
+            payloadProcessor.processChannelPayload(payload);
         }
     }
 }

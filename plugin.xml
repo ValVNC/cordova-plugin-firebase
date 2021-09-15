@@ -110,6 +110,7 @@ xmlns:android="http://schemas.android.com/apk/res/android">
 		<source-file src="src/android/models/PayloadTask.java" target-dir="src/org/apache/cordova/firebase/models" />
 		<source-file src="src/android/models/PayloadMail.java" target-dir="src/org/apache/cordova/firebase/models" />
 		<source-file src="src/android/models/MailInfoItem.java" target-dir="src/org/apache/cordova/firebase/models" />
+		<source-file src="src/android/models/PayloadChannel.java" target-dir="src/org/apache/cordova/firebase/models" />
 
 		<source-file src="src/android/actions/AcceptCallAction.java" target-dir="src/org/apache/cordova/firebase/actions" />
 		<source-file src="src/android/actions/BaseAction.java" target-dir="src/org/apache/cordova/firebase/actions" />
@@ -125,6 +126,7 @@ xmlns:android="http://schemas.android.com/apk/res/android">
 		<source-file src="src/android/actions/RejectCallAction.java" target-dir="src/org/apache/cordova/firebase/actions" />
         <source-file src="src/android/actions/LogFCMPluginAction.java" target-dir="src/org/apache/cordova/firebase/actions" />
         <source-file src="src/android/actions/CalendarOptionsAction.java" target-dir="src/org/apache/cordova/firebase/actions" />
+		<source-file src="src/android/actions/BaseActionChannel.java" target-dir="src/org/apache/cordova/firebase/actions" />
 
 		<framework src="src/android/build.gradle" custom="true" type="gradleReference" />
 		<framework src="com.google.android.gms:play-services-tagmanager:17.0.0" />

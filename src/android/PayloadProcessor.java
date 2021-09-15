@@ -9,6 +9,7 @@ import org.apache.cordova.firebase.models.PayloadTalk;
 import org.apache.cordova.firebase.models.PayloadTask;
 import org.apache.cordova.firebase.models.PayloadMail;
 import org.apache.cordova.firebase.models.PayloadCalendar;
+import org.apache.cordova.firebase.models.PayloadChannel;
 import org.apache.cordova.firebase.utils.WidgetNotifier;
 import org.apache.cordova.firebase.utils.FcmLoggerUtils;
 import org.apache.cordova.firebase.utils.JSLoader;
@@ -353,4 +354,48 @@ public class PayloadProcessor {
         }
         Log.d(TAG, "processCalendarPayload, after catch");
     }
+
+    public void processChannelPayload(Map<String, String> payload) {
+      try {
+          Log.d(TAG, "payload: " + payload);
+          JSONObject data = new JSONObject(payload.get("channels"));
+
+          if (data == null) {
+              Log.d(TAG, "received empty data?");
+              return;
+          }
+
+          PayloadChannel notificationItem = new Gson().fromJson(data.toString(), PayloadChannel.class);
+          final String body = notificationItem.body;
+          final String title = notificationItem.title;
+          final String notification = notificationItem.notification.toString();
+
+          if (FirebasePlugin.inBackground()) {
+            notificationPool.execute(new Runnable() {
+                public void run() {
+                    NotificationManager.displayChannelNotification(activityOrServiceContext, appContext,
+                            body, title, notification);
+                }
+            });
+          } else {
+            // pass a notification to JS app in foreground
+            // so then a JS app will decide what to do and call a 'scheduleLocalNotification'
+            if (FirebasePlugin.hasNotificationsReceivedCallback()) {
+                Log.i(TAG, "onNotificationReceived callback provided");
+
+                Bundle dataBundle = new Bundle();
+                dataBundle.putString("body", body);
+                dataBundle.putString("title", title);
+                dataBundle.putString("notification", notification);
+
+                FirebasePlugin.sendNotificationReceived(dataBundle);
+            } else {
+                Log.i(TAG, "no onNotificationReceived callback provided");
+            }
+          }
+      } catch (JSONException e) {
+          e.printStackTrace();
+          return;
+      }
+  }
 }
