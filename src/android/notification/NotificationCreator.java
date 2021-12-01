@@ -291,7 +291,7 @@ public class NotificationCreator {
     }
 
     static NotificationCompat.MessagingStyle defineMessagingStyle(String title, List<CharSequence> msgs) {
-        NotificationCompat.MessagingStyle messagingStyle = new NotificationCompat.MessagingStyle(title);
+        NotificationCompat.MessagingStyle messagingStyle = new NotificationCompat.MessagingStyle("You");
         //
         if (android.os.Build.VERSION.SDK_INT <= android.os.Build.VERSION_CODES.O) {
             messagingStyle.setConversationTitle(title);
