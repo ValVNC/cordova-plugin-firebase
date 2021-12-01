@@ -34,6 +34,7 @@ public class MarkAsReadAction extends BaseActionTalk {
         try {
             JSONObject postData = new JSONObject();
             postData.put(sender, new Date().getTime() / 1000);
+            postData.put("send_rtc_signal", "1");
 
             Log.i(TAG, "postData : " + postData);
 
