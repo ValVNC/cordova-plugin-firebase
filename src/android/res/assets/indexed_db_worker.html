@@ -661,6 +661,9 @@
             }
 
             let messages = res.docs.map(message => convertToXmppMessage(message));
+
+            messages = messages.filter(msg => !msg.encrypted); // ignore OMEMO messages
+
             const deletedMessages = messages.filter(msg => msg.replace).map(msg => msg.replace.id);
             messages = messages.filter(msg => !msg.replace).map(msg => {
                 msg.isDeleted = false;
@@ -721,7 +724,8 @@
             const currentUserId = currentUserJid.split("@")[0];
             this.dbName = `VNCtalkOfflineDatabase_${currentUserId}`
 
-            const fcmMsgs = JSON.parse(responseString);
+            let fcmMsgs = JSON.parse(responseString);
+            fcmMsgs = fcmMsgs.filter(msg => msg.body !== "Encrypted message"); // ignore OMEMO messages
 
             const res = {
                 docs: fcmMsgs.map(msg => {
