@@ -8,7 +8,7 @@ import android.widget.Button;
 import android.widget.EditText;
 import android.widget.Toast;
 
-
+import org.apache.cordova.firebase.actions.InlineReplyAction;
 
 public class ReplyActivity extends Activity implements View.OnClickListener {
     private EditText mMessageTextField;
@@ -16,7 +16,7 @@ public class ReplyActivity extends Activity implements View.OnClickListener {
     private Button mCancelButton;
     private String mReplyMessage;
     private static final String VNC_PEER_JID = "vncPeerJid";
-    private static final String  NOTIFY_ID = "id";
+    private static final String NOTIFY_ID = "id";
 
 
     @Override
@@ -36,17 +36,16 @@ public class ReplyActivity extends Activity implements View.OnClickListener {
         if (v == mSendButton) {
             Log.i("VNC", "Send");
             mReplyMessage = mMessageTextField.getText().toString();
-            if(mReplyMessage.equals("")){
-                Toast.makeText(this,"Please enter a message.",Toast.LENGTH_SHORT).show();
+            if (mReplyMessage.equals("")) {
+                Toast.makeText(this, "Please enter a message.", Toast.LENGTH_SHORT).show();
                 return;
             }
             String sender = getIntent().getExtras().getString(VNC_PEER_JID);
             int notificationId = Integer.parseInt(getIntent().getExtras().getString(NOTIFY_ID));
             Log.i("VNC", "inside receive");
 
-            Thread thread = new Thread(new HttpPost(mReplyMessage, sender, notificationId, getApplicationContext()));
+            Thread thread = new Thread(new InlineReplyAction(mReplyMessage, sender, notificationId, getApplicationContext()));
             thread.start();
-
         }
         finishAndRemoveTask();
     }

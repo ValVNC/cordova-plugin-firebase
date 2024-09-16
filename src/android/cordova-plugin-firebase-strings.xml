@@ -1,7 +1,16 @@
 <?xml version='1.0' encoding='utf-8'?>
 <resources>
-    <string name="default_notification_channel_id">fcm_default_channel</string>
+    <string name="default_notification_channel_id" translatable="false">fcm_default_channel</string>
     <string name="default_notification_channel_name">Default</string>
-    <string name="silent_notification_channel_id">fcm_muted_channel</string>
+    <string name="silent_notification_channel_id" translatable="false">fcm_muted_channel</string>
     <string name="silent_notification_channel_name">DefaultMute</string>
+    <string name="call_notifications_channel_name">Calls</string>
+	<string name="incoming_video_call">Incoming video call</string>
+	<string name="incoming_audio_call">Incoming audio call</string>
+	<string name="incoming_screen_share">Incoming screen share</string>
+	<string name="call_action_decline">Decline</string>
+	<string name="call_action_accept">Accept</string>
+	<string name="missed_video_call">Missed video call</string>
+	<string name="missed_audio_call">Missed audio call</string>
+	<string name="missed_screen_share">Missed screen share</string>
 </resources>

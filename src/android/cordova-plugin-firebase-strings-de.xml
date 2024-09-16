@@ -1,0 +1,13 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="default_notification_channel_name">Default</string>
+    <string name="silent_notification_channel_name">DefaultMute</string>
+    <string name="incoming_video_call">Eingehender Videoanruf</string>
+	<string name="incoming_audio_call">Eingehender Anruf</string>
+    <string name="incoming_screen_share">Eingehende Bildschirmübertragung</string>
+	<string name="call_action_decline">Ablehnen</string>
+	<string name="call_action_accept">Annehmen</string>
+	<string name="missed_video_call">Entgangener Videoanruf</string>
+	<string name="missed_audio_call">Entgangener Anruf</string>
+	<string name="missed_screen_share">Entgangene Bildschirmübertragung</string>
+</resources>

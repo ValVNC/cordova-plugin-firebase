@@ -1,0 +1,799 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>IndexedDB worker</title>
+</head>
+
+<body>
+    <h1>VNC</h1>
+    <p>IndexedDB script</p>
+    <script>
+        console.log("[indexed_db_worker]started");
+
+        const MESSAGES_DB_STORE = "MessagesStore";
+        const INDEX_BY_SORT_ID = "by-sort-id";
+
+        const CONVERSATIONS_DB_STORE = "ConversationsStore";
+        const INDEX_BY_TARGET = "by-target";
+
+        function idbContext() {
+            return new Promise((resolve, reject) => {
+                if (this.db) {
+                    resolve(db);
+                } else {
+                    var request = indexedDB.open(this.dbName);
+                    request.onerror = function (event) {
+                        console.log("[indexed_db_worker][indexedDB.open][onerror]", event.target.errorCode);
+                        reject(event.target.errorCode);
+                    };
+
+                    request.onsuccess = function (event) {
+                        console.log("[indexed_db_worker][indexedDB.open][onsuccess]");
+                        this.db = event.target.result;
+                        resolve(this.db);
+                    };
+                }
+            });
+        }
+
+        function getMessageById(mid) {
+            console.log("[indexed_db_worker][getMessageById]", mid);
+            return new Promise((resolve, reject) => {
+                idbContext().then(db => {
+                    const tx = db.transaction([MESSAGES_DB_STORE], 'readonly');
+                    const request = tx.objectStore(MESSAGES_DB_STORE).get(IDBKeyRange.only(mid));
+
+                    request.onerror = function (event) {
+                        console.error("[indexed_db_worker][getMessageById] onerror", event);
+                        reject(error);
+                    };
+                    request.onsuccess = function (event) {
+                        console.log("[indexed_db_worker][getMessageById] onsuccess", JSON.stringify(request.result));
+                        resolve(request.result);
+                    };
+                });
+            });
+        }
+
+        function _saveMessages$(convTarget, messages) {
+            console.log("[indexed_db_worker][_saveMessages$]", convTarget, messages);
+
+            const messagesForConv = {};
+
+            messages.forEach(message => {
+                if (message.type === "CHAT.JOIN"
+                    || message.type === "CHAT.LEAVE"
+                    || message.type === "CHAT.KICK"
+                    || message.mucInvite
+                    || (message.attachment && message.status === 'PENDING')) {
+                    // skip
+                } else {
+                    if (!messagesForConv[convTarget]) {
+                        messagesForConv[convTarget] = {};
+                    }
+                    messagesForConv[convTarget][message.id] = message;
+                }
+            });
+
+            console.log("[indexed_db_worker][_saveMessages$] messagesForConv", messagesForConv);
+
+            // get all existing messages first
+            const getMsgs$ = [];
+            let totalCountForProcessing = 0;
+            for (const convTarget of Object.keys(messagesForConv)) {
+                const messagesForSpecConv = Object.values(messagesForConv[convTarget]);
+                totalCountForProcessing += messagesForSpecConv.length;
+                messagesForSpecConv.forEach(message => {
+                    getMsgs$.push(getMessageById(message.id));
+                });
+            }
+            console.log("[indexed_db_worker][_saveMessages$] totalCountForProcessing", totalCountForProcessing);
+
+            console.log("[indexed_db_worker][_saveMessages$] messagesForConv", messagesForConv);
+            return new Promise((resolve, reject) => {
+                const existingMessagesMap = {};
+
+                Promise.all(getMsgs$).then(existingMessages => {
+                    console.log("[indexed_db_worker][_saveMessages$] existingMessages", existingMessages);
+                    existingMessages.forEach((m) => {
+                        if (m) {
+                            existingMessagesMap[m.id] = m;
+                        }
+                    });
+
+                    idbContext().then(db => {
+                        const tx = db.transaction([MESSAGES_DB_STORE], "readwrite");
+                        const objectStore = tx.objectStore(MESSAGES_DB_STORE);
+
+                        let totalProcessedMsgs = 0;
+
+                        for (const convTarget of Object.keys(messagesForConv)) {
+                            const messages = Object.values(messagesForConv[convTarget]);
+
+                            messages.forEach(message => {
+                                const existingMsg = existingMessagesMap[message.id];
+                                const objToSave = existingMsg ? { ...existingMsg, ...message } : { ...message };
+                                objToSave.convTarget = convTarget;
+                                const request = objectStore.put(objToSave);
+
+                                request.onerror = function (event) {
+                                    console.error("[indexed_db_worker][_saveMessages$] onerror: ", event);
+                                    totalProcessedMsgs++;
+                                    if (totalProcessedMsgs == totalCountForProcessing) {
+                                        resolve(true);
+                                    }
+                                };
+                                request.onsuccess = function (event) {
+                                    console.log("[indexed_db_worker][_saveMessages$] onsuccess: ", JSON.stringify(request.result));
+                                    totalProcessedMsgs++;
+                                    if (totalProcessedMsgs == totalCountForProcessing) {
+                                        resolve(true);
+                                    }
+                                };
+                            });
+                        }
+                    });
+                });
+            });
+        }
+
+        function getMediaType(body) {
+            if (!body) {
+                return "attachments";
+            }
+            if ((body.lastIndexOf("aac") === body.length - 3) ||
+                (body.lastIndexOf("amr") === body.length - 3) ||
+                (body.lastIndexOf("aiff") === body.length - 4) ||
+                (body.lastIndexOf("flac") === body.length - 4) ||
+                (body.lastIndexOf("mp3") === body.length - 3) ||
+                (body.lastIndexOf("oog") === body.length - 3) ||
+                (body.lastIndexOf("wma") === body.length - 3) ||
+                (body.lastIndexOf("wav") === body.length - 3)) {
+                return "voice-messages";
+            }
+
+            if ((body.lastIndexOf("jpeg") === body.length - 4) ||
+                (body.lastIndexOf("jpg") === body.length - 3) ||
+                (body.lastIndexOf("gif") === body.length - 3) ||
+                (body.lastIndexOf("png") === body.length - 3) ||
+                (body.lastIndexOf("bmp") === body.length - 3) ||
+                (body.lastIndexOf("svg") === body.length - 3) ||
+                (body.lastIndexOf("tiff") === body.length - 4) ||
+                (body.lastIndexOf("ico") === body.length - 3) ||
+                (body.lastIndexOf("odi") === body.length - 3)) {
+                return "image";
+            }
+
+            if ((body.lastIndexOf("3gp") === body.length - 3) ||
+                (body.lastIndexOf("avi") === body.length - 3) ||
+                (body.lastIndexOf("flv") === body.length - 3) ||
+                (body.lastIndexOf("m4v") === body.length - 3) ||
+                (body.lastIndexOf("mkv") === body.length - 3) ||
+                (body.lastIndexOf("mov") === body.length - 3) ||
+                (body.lastIndexOf("mp4") === body.length - 3) ||
+                (body.lastIndexOf("mpeg") === body.length - 4) ||
+                (body.lastIndexOf("mpg") === body.length - 3) ||
+                (body.lastIndexOf("mts") === body.length - 3) ||
+                (body.lastIndexOf("rm") === body.length - 2) ||
+                (body.lastIndexOf("vob") === body.length - 3) ||
+                (body.lastIndexOf("wmv") === body.length - 3)) {
+                return "videos";
+            }
+
+            if (body.lastIndexOf("pdf") === body.length - 3) {
+                return "pdf";
+            }
+
+            if ((body.lastIndexOf("txt") === body.length - 3) ||
+                (body.lastIndexOf("rtf") === body.length - 3) ||
+                (body.lastIndexOf("dat") === body.length - 3)) {
+                return "txt";
+            }
+
+            if ((body.lastIndexOf("doc") === body.length - 3) ||
+                (body.lastIndexOf("docx") === body.length - 4) ||
+                (body.lastIndexOf("docm") === body.length - 4) ||
+                (body.lastIndexOf("odt") === body.length - 3)) {
+                return "doc";
+            }
+
+            if ((body.lastIndexOf("xls") === body.length - 3) ||
+                (body.lastIndexOf("xlr") === body.length - 3) ||
+                (body.lastIndexOf("xlsx") === body.length - 4) ||
+                (body.lastIndexOf("xlsm") === body.length - 3) ||
+                (body.lastIndexOf("ods") === body.length - 3) ||
+                (body.lastIndexOf("csv") === body.length - 3) ||
+                (body.lastIndexOf("tsv") === body.length - 3)) {
+                return "excel";
+            }
+
+            if ((body.lastIndexOf("ppt") === body.length - 3) ||
+                (body.lastIndexOf("pptx") === body.length - 4) ||
+                (body.lastIndexOf("pps") === body.length - 3) ||
+                (body.lastIndexOf("odp") === body.length - 3)) {
+                return "ppt";
+            }
+
+            if ((body.lastIndexOf("rar") === body.length - 3) ||
+                (body.lastIndexOf("tar") === body.length - 3)) {
+                return "rar";
+            }
+
+            if ((body.lastIndexOf("zip") === body.length - 3) ||
+                (body.lastIndexOf("7z") === body.length - 2)) {
+                return "zip";
+            }
+
+            return "attachments";
+        }
+
+        function mapServerMessage(searchMessage) {
+            const timestamp = new Date(searchMessage.date).getTime();
+            const resultType = getMediaType(searchMessage.body);
+            const type = searchMessage.room ? "groupchat" : "chat";
+            const sort_id = searchMessage.sort_id ? +searchMessage.sort_id : null;
+
+            let id;
+            if (searchMessage.id) {
+                const splitId = searchMessage.id.split("_");
+                id = splitId[splitId.length - 1];
+            } else {
+                id = String(timestamp);
+            }
+
+            const msg = {
+                ...searchMessage,
+                id: id,
+                timestamp: timestamp,
+                resultType: resultType,
+                type: type
+            };
+
+            if (sort_id) {
+                msg.sort_id = sort_id;
+            }
+
+            return msg;
+        }
+
+        function mapFCMMessage(fcmMessage) {
+            console.log('[indexed_db_worker][mapFCMMessage] fcmMessage', JSON.stringify(fcmMessage));
+            //     {
+            //       "syncpush":true,
+            //       "jid":"test__group_urqog2nnqmh8_talk@conference.dev.vnc.de",
+            //       "nfrom":"nightwatch.test6@dev.vnc.de",
+            //       "jitsiURL":"",
+            //       "eType":"groupchat",
+            //       "nto":"nightwatch.test7@dev.vnc.de",
+            //       "msgid":"f3078oku49",
+            //       "body":"10",
+            //       "gt":"Test group",
+            //       "aft":"",
+            //       "mention":[
+
+            //       ],
+            //       "t":1630317718,
+            //       "replaceid":"",
+            //       "jitsiRoom":"",
+            //       "name":"Nightwatch Test6",
+            //       "lang":"en",
+            //       "nsound":"nomute",
+            //       "nType":"local_notification"
+            //    }
+            const timestamp = new Date(fcmMessage.t).getTime();
+            const resultType = getMediaType(fcmMessage.body);
+            const type = fcmMessage.eType;
+            const sort_id = fcmMessage.sort_id ? +fcmMessage.sort_id : null;
+
+            let id;
+            if (fcmMessage.msgid) {
+                id = fcmMessage.msgid;
+            } else {
+                id = String(timestamp);
+            }
+            //      {
+            //          "sort_id":"554786",
+            //          "body":"9",
+            //          "date":1630315070000,
+            //          "from":"nightwatch.test7@dev.vnc.de",
+            //          "to":"test__group_urqog2nnqmh8_talk@conference.dev.vnc.de",
+            //          "owner":"test__group_urqog2nnqmh8_talk@conference.dev.vnc.de",
+            //          "room":"test__group_urqog2nnqmh8_talk@conference.dev.vnc.de",
+            //          "type":"groupchat",
+            //          "id":"nightwatch.test6@dev.vnc.de_jg6gphtivg",
+            //          "mention":"[]",
+            //          "htmlbody":"<body xmlns=\"http://www.w3.org/1999/xhtml\">9</body>"
+            //       }
+            const msg = {
+                body: fcmMessage.body,
+                date: fcmMessage.t,
+                from: fcmMessage.nfrom,
+                to: fcmMessage.nto,
+                owner: fcmMessage.jid,
+                type: type,
+                id: id,
+                mention: JSON.stringify(fcmMessage.mention),
+                htmlbody: null,
+                timestamp: timestamp,
+                resultType: resultType,
+            };
+
+            if (sort_id) {
+                msg.sort_id = sort_id;
+            }
+
+            if (type == "groupchat") {
+                msg.room = fcmMessage.jid;
+            }
+
+            console.log('[indexed_db_worker][mapFCMMessage] msg', JSON.stringify(msg));
+            return msg;
+        }
+
+        function convertMessageToFromStringToObject(to, resource) {
+            if (typeof to === "object") {
+                return to;
+            }
+
+            to = to || "";
+            return {
+                local: to.split("@")[0],
+                domain: to.split("@")[1],
+                resource: resource ? resource : "some_random_res",
+                bare: to,
+                full: to,
+                unescapedBare: to,
+                unescapedFull: to,
+                unescapedLocal: to.split("@")[0]
+            };
+        }
+
+        function convertFromObject(from, room = undefined) {
+            const randomResource = "some_random_res";
+
+            if (room) {
+                return {
+                    local: room.split("@")[0],
+                    domain: room.split("@")[1],
+                    full: room + "/" + from,
+                    resource: from,
+                    bare: room,
+                };
+            } else {
+                return {
+                    local: from.split("@")[0],
+                    domain: from.split("@")[1],
+                    full: from + "/" + randomResource,
+                    resource: randomResource,
+                    bare: from,
+                };
+            }
+        }
+
+        function convertToXmppMessage(message) {
+            // console.log("[[indexed_db_worker][convertToXmppMessage]", message);
+
+            let htmlBody = message.htmlbody;
+            const text = /<body xmlns=\"http:\/\/www.w3.org\/1999\/xhtml\">(.*)<\/body>/ig.exec(htmlBody);
+            if (!!text && text[1]) {
+                htmlBody = text[1];
+            }
+            // console.log("[indexed_db_worker][convertToXmppMessage] message: ", message);
+            let mStatus = 'SENT';
+            if (!!message.receipts) {
+                mStatus = 'DELIVERED';
+            }
+
+            let response = {
+                fromJid: message.from,
+                body: message.body,
+                htmlBody: htmlBody,
+                timestamp: message.timestamp,
+                file: null,
+                isForwarded: false,
+                isStarred: message.isStarred,
+                status: mStatus,
+                requestReceipt: true,
+                id: message.id,
+                tags: message.tags,
+                to: convertMessageToFromStringToObject(message.to),
+            };
+
+            if (!!message.isStarred) {
+                let tags = ["*"];
+                if (!!response.tags && (response.tags.length > 0)) {
+                    response.tags.push("*");
+                } else {
+                    response.tags = tags;
+                }
+                response["isStarred"] = true;
+            }
+
+            if (message.x_attachment) {
+                response["attachment"] = JSON.parse(message.x_attachment);
+
+                // check if this is an attach reply
+                if (response["attachment"]["$t"]) {
+                    response["attachment"] = JSON.parse(response["attachment"]["$t"]);
+                }
+            }
+
+            if (message.broadcast) {
+                response["broadcast"] = message.broadcast;
+            }
+
+            if (message.mention && message.mention !== "[]") {
+                const mention = JSON.parse(message.mention);
+                response["references"] = mention.map(m => {
+                    m = m.replace(/xmpp:+/ig, "");
+                    const data = {
+                        type: "mention",
+                        uri: `xmpp:${m}`
+                    };
+                    return data;
+                });
+            }
+
+            if (message.sort_id) {
+                response["sort_id"] = message.sort_id;
+            }
+
+            if (message.x_origMessage) {
+                response["originalMessage"] = typeof message.x_origMessage === "string" ? JSON.parse(message.x_origMessage) : message.x_origMessage;
+            }
+
+            if (message.x_forwardMessage) {
+                response["forwardMessage"] = typeof message.x_forwardMessage === "string" ? JSON.parse(message.x_forwardMessage) : message.x_forwardMessage;
+                response["isForwarded"] = true;
+            }
+
+            if (message.x_vncConference) {
+                response["vncTalkConference"] = JSON.parse(message.x_vncConference);
+            }
+
+            if (message.x_location) {
+                response["location"] = JSON.parse(message.x_location);
+            }
+
+            if (message.x_replaceMsgId) {
+                response["replace"] = { id: message.x_replaceMsgId };
+                // response["id"] =  message.x_replaceMsgId;
+                // response["isDeleted"] =  true;
+                // response["body"] =  null;
+            }
+
+            if (message.room) {
+                response["from"] = convertFromObject(message.from, message.room);
+                response["type"] = "groupchat";
+            } else {
+                response["from"] = convertFromObject(message.from);
+                response["type"] = "chat";
+            }
+
+            if (message.group_action) {
+                response["group_action"] = { type: message.group_action };
+            }
+
+            // omemo
+            if (message.encrypted) {
+                response["encrypted"] = message.encrypted;
+            }
+            if (message.encryption) {
+                response["encryption"] = message.encryption;
+            }
+
+            // console.log("[MessageUtils][convertToXmppMessage]", message, response);
+
+            return response;
+        }
+
+        function getMaxSortId() {
+            console.log("[indexed_db_worker][getMaxSortId]");
+            return new Promise((resolve, reject) => {
+                idbContext().then(db => {
+                    const tx = db.transaction([MESSAGES_DB_STORE], 'readonly');
+                    const store = tx.objectStore(MESSAGES_DB_STORE);
+                    const index = store.index(INDEX_BY_SORT_ID);
+                    const request = index.openCursor(null, "prev");
+
+                    request.onerror = function (event) {
+                        console.error("[indexed_db_worker][getMaxSortId] onerror ", event);
+                        reject(error);
+                    };
+                    request.onsuccess = function (event) {
+                        console.log("[indexed_db_worker][getMaxSortId] onsuccess ", JSON.stringify(request.result));
+                        let cursor = event.target.result;
+                        if (cursor) {
+                            const maxSortId = cursor.value.sort_id;
+                            resolve(maxSortId);
+                        }
+                    };
+                });
+            });
+        }
+
+        function updateConvLastMsg(target, timestamp, body) {
+            console.log("[indexed_db_worker][updateConvByTarget]", target, timestamp, body);
+            return new Promise((resolve, reject) => {
+                idbContext().then(db => {
+                    const tx = db.transaction([CONVERSATIONS_DB_STORE], 'readwrite');
+                    const store = tx.objectStore(CONVERSATIONS_DB_STORE);
+                    const index = store.index(INDEX_BY_TARGET);
+                    const getRequest = index.get(IDBKeyRange.only(target));
+
+                    getRequest.onerror = function (event) {
+                        console.error("[indexed_db_worker][updateConvByTarget] onerror ", event);
+                        reject(error);
+                    };
+                    getRequest.onsuccess = function (event) {
+                        const existConv = getRequest.result;
+                        console.log("[indexed_db_worker][updateConvByTarget] onsuccess ", JSON.stringify(getRequest.result));
+
+                        if (existConv) {
+                            const existTimeStamp = existConv.Timestamp;
+
+                            if (existTimeStamp < timestamp) {
+                                existConv.Timestamp = timestamp;
+                                existConv.content = body;
+
+                                store.put(existConv);
+                            }
+                        }
+
+                        resolve(existConv);
+                    };
+                });
+            });
+        }
+
+        function getMaxSortIdSync(currentUserJid) {
+            console.log("[indexed_db_worker][getMaxSortIdSync] currentUserJid: ", currentUserJid);
+
+            const currentUserId = currentUserJid.split("@")[0];
+            this.dbName = `VNCtalkOfflineDatabase_${currentUserId}`;
+
+            return getMaxSortId();
+        }
+
+        //TODO unused
+        function fetchMessages(url, authToken, currentUserJid) {
+            console.log("[indexed_db_worker][fetchMessages]", url, authToken, currentUserJid);
+
+            const currentUserId = currentUserJid.split("@")[0];
+            this.dbName = `VNCtalkOfflineDatabase_${currentUserId}`;
+
+            getMaxSortId().then(sortId => {
+                console.log("[indexed_db_worker][fetchMessages] sortId = ", sortId);
+                const data = {
+                    excludeGroupchat: false,
+                    offset: 0,
+                    rows: 1000,
+                    sida: sortId,
+                    tags: []
+                };
+
+                fetch(url + '/sync-messages', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': authToken,
+                    },
+                    body: JSON.stringify(data),
+                })
+                    .then(response => {
+                        console.log('[indexed_db_worker][fetchMessages] Success 1: response: ', JSON.stringify(response));
+                        return response.json();
+                    })
+                    .then(data => {
+                        console.log('[indexed_db_worker][fetchMessages] Success 2: data: ', JSON.stringify(data));
+
+                        const res = {
+                            ...data,
+                            docs: data.docs.map(doc => mapServerMessage(doc))
+                        }
+
+                        let messages = res.docs.map(message => convertToXmppMessage(message));
+                        const deletedMessages = messages.filter(msg => msg.replace).map(msg => msg.replace.id);
+                        messages = messages.filter(msg => !msg.replace).map(msg => {
+                            msg.isDeleted = false;
+                            if (deletedMessages.indexOf(msg.id) !== -1) {
+                                msg.isDeleted = true;
+                                msg.body = null;
+                            }
+                            return msg;
+                        });
+
+                        let messagesToSync = {};
+                        let counter = 1;
+                        messages.forEach(message => {
+                            let conversationTarget;
+                            message.timestamp += counter;
+                            counter++;
+                            if (message.type === "groupchat") {
+                                if (message.fromJid !== currentUserJid) {
+                                    conversationTarget = message.from.bare;
+                                } else {
+                                    // this is a message from yourself, so we need to use an opponent jid as a conv target
+                                    conversationTarget = message.to.bare;
+                                }
+                            } else {
+                                if (message.fromJid !== currentUserJid) {
+                                    conversationTarget = message.fromJid;
+                                } else {
+                                    // this is a message from yourself, so we need to use an opponent jid as a conv target
+                                    conversationTarget = message.to.bare;
+                                }
+                            }
+
+                            if (messagesToSync[conversationTarget]) {
+                                messagesToSync[conversationTarget].push(message);
+                            } else {
+                                messagesToSync[conversationTarget] = [message];
+                            }
+                        });
+                        console.log("[indexed_db_worker][fetchMessages] messagesToSync", messagesToSync);
+
+                        for (const conversationTarget of Object.keys(messagesToSync)) {
+                            _saveMessages$(conversationTarget, messagesToSync[conversationTarget]);
+                        }
+                    })
+                    .catch((error) => {
+                        console.error('[indexed_db_worker][fetchMessages] 1 Error:', error);
+                    });
+            })
+                .catch((error) => {
+                    console.error('[indexed_db_worker][fetchMessages] 2 Error:', error);
+                });
+        }
+
+        function processSyncMessagesResponse(responseString, currentUserJid) {
+            console.log('[indexed_db_worker][processSyncMessagesResponse] responseString', responseString);
+
+            const currentUserId = currentUserJid.split("@")[0];
+            this.dbName = `VNCtalkOfflineDatabase_${currentUserId}`
+
+            const data = JSON.parse(responseString);
+
+            const res = {
+                ...data,
+                docs: data.docs.map(doc => mapServerMessage(doc))
+            }
+
+            let messages = res.docs.map(message => convertToXmppMessage(message));
+
+            messages = messages.filter(msg => !msg.encrypted); // ignore OMEMO messages
+
+            const deletedMessages = messages.filter(msg => msg.replace).map(msg => msg.replace.id);
+            messages = messages.filter(msg => !msg.replace).map(msg => {
+                msg.isDeleted = false;
+                if (deletedMessages.indexOf(msg.id) !== -1) {
+                    msg.isDeleted = true;
+                    msg.body = null;
+                }
+                return msg;
+            });
+
+            let messagesToSync = {};
+            let counter = 1;
+            messages.forEach(message => {
+                let conversationTarget;
+                message.timestamp += counter;
+                counter++;
+                if (message.type === "groupchat") {
+                    if (message.fromJid !== currentUserJid) {
+                        conversationTarget = message.from.bare;
+                    } else {
+                        // this is a message from yourself, so we need to use an opponent jid as a conv target
+                        conversationTarget = message.to.bare;
+                    }
+                } else {
+                    if (message.fromJid !== currentUserJid) {
+                        conversationTarget = message.fromJid;
+                    } else {
+                        // this is a message from yourself, so we need to use an opponent jid as a conv target
+                        conversationTarget = message.to.bare;
+                    }
+                }
+
+                if (messagesToSync[conversationTarget]) {
+                    messagesToSync[conversationTarget].push(message);
+                } else {
+                    messagesToSync[conversationTarget] = [message];
+                }
+            });
+            console.log("[indexed_db_worker][fetchMessages] processSyncMessagesResponse", messagesToSync);
+
+            const saveMsgs$ = [];
+            for (const conversationTarget of Object.keys(messagesToSync)) {
+                saveMsgs$.push(_saveMessages$(conversationTarget, messagesToSync[conversationTarget]));
+            }
+
+            Promise.all(saveMsgs$).then(existingMessages => {
+                console.log("[indexed_db_worker][fetchMessages] processSyncMessagesResponse, all completed");
+                idbContext().then(db => {
+                    db.close();
+                    syncMsgsBridge.putSyncCompletedResult(true);
+                });
+            });
+        }
+
+        function saveFCMToIndexedDB(responseString, currentUserJid) {
+            console.log('[indexed_db_worker][saveFCMToIndexedDB] responseString', responseString);
+
+            const currentUserId = currentUserJid.split("@")[0];
+            this.dbName = `VNCtalkOfflineDatabase_${currentUserId}`
+
+            let fcmMsgs = JSON.parse(responseString);
+            fcmMsgs = fcmMsgs.filter(msg => msg.body !== "Encrypted message"); // ignore OMEMO messages
+
+            const res = {
+                docs: fcmMsgs.map(msg => {
+                    const result = mapFCMMessage(msg);
+
+                    const target = result.owner;
+                    updateConvLastMsg(target, +result.timestamp * 1000, result.body)
+
+                    return result;
+                })
+            };
+
+            let messages = res.docs.map(message => convertToXmppMessage(message));
+            const deletedMessages = messages.filter(msg => msg.replace).map(msg => msg.replace.id);
+            messages = messages.filter(msg => !msg.replace).map(msg => {
+                msg.isDeleted = false;
+                if (deletedMessages.indexOf(msg.id) !== -1) {
+                    msg.isDeleted = true;
+                    msg.body = null;
+                }
+                return msg;
+            });
+
+            let messagesToSync = {};
+            let counter = 1;
+
+            messages.forEach(message => {
+                let conversationTarget;
+                message.timestamp += counter;
+                counter++;
+                if (message.type === "groupchat") {
+                    if (message.fromJid !== currentUserJid) {
+                        conversationTarget = message.from.bare;
+                    } else {
+                        // this is a message from yourself, so we need to use an opponent jid as a conv target
+                        conversationTarget = message.to.bare;
+                    }
+                } else {
+                    if (message.fromJid !== currentUserJid) {
+                        conversationTarget = message.fromJid;
+                    } else {
+                        // this is a message from yourself, so we need to use an opponent jid as a conv target
+                        conversationTarget = message.to.bare;
+                    }
+                }
+
+                if (messagesToSync[conversationTarget]) {
+                    messagesToSync[conversationTarget].push(message);
+                } else {
+                    messagesToSync[conversationTarget] = [message];
+                }
+            });
+            console.log("[indexed_db_worker][saveFCMToIndexedDB] messagesToSync", messagesToSync);
+
+            const saveMsgs$ = [];
+            for (const conversationTarget of Object.keys(messagesToSync)) {
+                saveMsgs$.push(_saveMessages$(conversationTarget, messagesToSync[conversationTarget]));
+            }
+
+            Promise.all(saveMsgs$).then(existingMessages => {
+                console.log("[indexed_db_worker][saveFCMToIndexedDB] all campleted");
+                idbContext().then(db => {
+                    db.close();
+                    saveFcmBridge.putSavingCompletedResult(true);
+                });
+            });
+        }
+    </script>
+</body>
+
+</html>

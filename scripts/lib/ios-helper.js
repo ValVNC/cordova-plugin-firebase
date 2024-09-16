@@ -59,6 +59,10 @@ module.exports = {
         value: id,
         comment: comment
       });
+      
+      // need to add only to one target, otherwise will get an error:
+      // error: Multiple commands produce '<execute-shell-script-6ac45bf72a22b24ae179e3f6769283c32133e27ec7d6eb75101dcc67f278029c>':
+      break; //
     }
 
     // Finally, write the .pbxproj back out to disk.

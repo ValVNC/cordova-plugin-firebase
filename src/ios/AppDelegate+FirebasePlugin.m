@@ -3,6 +3,7 @@
 #import "Firebase.h"
 #import <objc/runtime.h>
 #import <Foundation/Foundation.h>
+#import "FirebaseActionsManager.h"
 
 #if defined(__IPHONE_10_0) && __IPHONE_OS_VERSION_MAX_ALLOWED >= __IPHONE_10_0
 #import <UserNotifications/UserNotifications.h>
@@ -64,10 +65,13 @@
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(tokenRefreshNotification:)
                                                  name:kFIRInstanceIDTokenRefreshNotification object:nil];
 
+    [FirebaseActionsManager registerTalkNotificationCategoriesAndActionsForCallRequest];
+    [FirebaseActionsManager registerTalkNotificationCategoriesAndActionsForChatMessage];
+
     self.applicationInBackground = @(YES);
 
     return YES;
-      }
+}
 
 - (void)applicationDidBecomeActive:(UIApplication *)application {
     [self connectToFcm];
@@ -107,6 +111,8 @@
 - (void)application:(UIApplication *)application didRegisterForRemoteNotificationsWithDeviceToken:(NSData *)deviceToken {
     [FIRMessaging messaging].APNSToken = deviceToken;
     NSLog(@"deviceToken1 = %@", deviceToken);
+
+    [FirebasePlugin.firebasePlugin sendAPNSToken:deviceToken];
 }
 
 - (void)application:(UIApplication *)application didReceiveRemoteNotification:(NSDictionary *)userInfo {
@@ -124,199 +130,11 @@
     fetchCompletionHandler:(void (^)(UIBackgroundFetchResult))completionHandler {
 
     NSDictionary *mutableUserInfo = [userInfo mutableCopy];
-
     [mutableUserInfo setValue:self.applicationInBackground forKey:@"tap"];
+
     // Print full message.
-    NSLog(@"%@", mutableUserInfo);
+    NSLog(@"mutableUserInfo: %@", mutableUserInfo);
     completionHandler(UIBackgroundFetchResultNewData);
-
-
-    // Pring full message.
-    NSLog(@"[FIREBASE] [Remote Notification Received] didR complete%@", mutableUserInfo);
-
-    if ([self.applicationInBackground isEqual:@1] && [mutableUserInfo objectForKey:@"vnc"]) {
-
-
-        NSMutableDictionary *notificationPayloads;
-
-        if([[mutableUserInfo objectForKey:@"vnc"] isKindOfClass:[NSArray class]]){
-            notificationPayloads = [mutableUserInfo objectForKey:@"vnc"];
-        }
-
-        if([[mutableUserInfo objectForKey:@"vnc"] isKindOfClass:[NSString class]]){
-            NSError *payloadJsonError;
-            NSData *payloadsData = [[mutableUserInfo objectForKey:@"vnc"] dataUsingEncoding:NSUTF8StringEncoding];
-            notificationPayloads = [[NSJSONSerialization JSONObjectWithData:payloadsData
-                                                                    options:NSJSONReadingMutableContainers
-                                                                      error:&payloadJsonError] mutableCopy];
-        }
-
-        if (!notificationPayloads) {
-            // Returning if we are not able to decypt the payload.
-            return;
-        }
-
-        for(NSMutableDictionary *vncNotificationPayload in notificationPayloads) {
-
-            NSString* filePath = [NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES) objectAtIndex:0];
-            NSString* fileName = @"notificationMapping.json";
-            NSString* fileAtPath = [filePath stringByAppendingPathComponent:fileName];
-
-            if ([[vncNotificationPayload objectForKey:@"nfor2"]  isEqual: @"local_notification"]) {
-                // Pinging RequestBin
-                NSDictionary *headers = @{ @"Cache-Control": @"no-cache",
-                                           @"Postman-Token": @"ad782b37-98d2-4d43-8dde-168080358703" };
-
-                NSMutableURLRequest *requestBinRequest = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:@"https://http-reqbin.herokuapp.com/1acx0631"]
-                                                                                 cachePolicy:NSURLRequestUseProtocolCachePolicy
-                                                                             timeoutInterval:10.0];
-                [requestBinRequest setHTTPMethod:@"GET"];
-                [requestBinRequest setAllHTTPHeaderFields:headers];
-
-                NSURLSession *session = [NSURLSession sharedSession];
-                NSURLSessionDataTask *dataTask = [session dataTaskWithRequest:requestBinRequest
-                                                            completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
-                                                                if (error) {
-                                                                    NSLog(@"%@", error);
-                                                                } else {
-                                                                    NSHTTPURLResponse *httpResponse = (NSHTTPURLResponse *) response;
-                                                                    NSLog(@"%@", httpResponse);
-                                                                }
-                                                            }];
-                [dataTask resume];
-            }
-
-            // Reading mapping from file
-            NSString* fileContent = [[NSString alloc] initWithData:[NSData dataWithContentsOfFile:fileAtPath] encoding:NSUTF8StringEncoding];
-
-            if ([fileContent  isEqual: @""]) {
-                fileContent = @"{}";
-            }
-
-            NSError *jsonError;
-            NSData *objectData = [fileContent dataUsingEncoding:NSUTF8StringEncoding];
-            NSMutableDictionary *oldMapping = [[NSJSONSerialization JSONObjectWithData:objectData
-                                                                               options:NSJSONReadingMutableContainers
-                                                                                 error:&jsonError] mutableCopy];
-
-            int randomNumber = arc4random_uniform(99999);
-            NSLog(@"[FIREBASE] [Remote Notification Received] random Number %d", randomNumber);
-
-            NSString* conversationTarget = [vncNotificationPayload objectForKey:@"jid"];
-            NSString* senderName = [vncNotificationPayload objectForKey:@"name"];
-            NSString* messageContent = [vncNotificationPayload objectForKey:@"body"];
-
-            NSMutableArray *notificationIds=[[NSMutableArray alloc]init];
-            if (oldMapping[conversationTarget]) {
-                if([[oldMapping objectForKey:conversationTarget] isKindOfClass:[NSArray class]]){
-
-                    for(NSNumber *notificationId in [oldMapping objectForKey:conversationTarget]) {
-                        [notificationIds addObject:notificationId];
-                    }
-                }
-            }
-            [notificationIds addObject:[NSNumber numberWithInt:randomNumber]];
-
-            [oldMapping setObject:notificationIds forKey:conversationTarget];
-
-            NSError * err;
-            NSData * jsonData = [NSJSONSerialization  dataWithJSONObject:oldMapping options:0 error:&err];
-            NSString * newMapping = [[NSString alloc] initWithData:jsonData   encoding:NSUTF8StringEncoding];
-            NSLog(@"%@", newMapping);
-
-            // Creating File Ref
-            if (![[NSFileManager defaultManager] fileExistsAtPath:fileAtPath]) {
-                [[NSFileManager defaultManager] createFileAtPath:fileAtPath contents:nil attributes:nil];
-            }
-
-
-            // Custom Reply Action.
-            UNNotificationAction* replyAction = [UNTextInputNotificationAction
-                                                 actionWithIdentifier: conversationTarget
-                                                 title:@"Reply Action"
-                                                 options: UNNotificationActionOptionAuthenticationRequired
-                                                 textInputButtonTitle: @"Reply"
-                                                 textInputPlaceholder: @"Type Message Here..."];
-
-            // Registering General Category
-            UNNotificationCategory* category;
-            category = [UNNotificationCategory
-                        categoryWithIdentifier:@"GENERAL"
-                        actions:@[replyAction]
-                        intentIdentifiers:@[]
-                        options:UNNotificationCategoryOptionCustomDismissAction];
-            UNUserNotificationCenter *center = [UNUserNotificationCenter currentNotificationCenter];
-            [center setNotificationCategories:[NSSet setWithObject:category]];
-
-            // Writing mapping back to file
-            [[newMapping dataUsingEncoding:NSUTF8StringEncoding] writeToFile:fileAtPath atomically:NO];
-
-            // Writing id:target mapping
-            NSUserDefaults* userDefaults = [NSUserDefaults standardUserDefaults];
-            NSMutableDictionary* reverseMapping;
-
-            if ([userDefaults objectForKey:@"reverseMapping"]) {
-                reverseMapping = [[userDefaults objectForKey:@"reverseMapping"] mutableCopy];
-            } else {
-                reverseMapping = [[NSMutableDictionary alloc] init];
-            }
-
-            NSLog(@"%@", reverseMapping);
-
-
-            [reverseMapping setObject:conversationTarget forKey:[NSString stringWithFormat:@"%d", randomNumber]];
-
-            [userDefaults setObject:reverseMapping forKey:@"reverseMapping"];
-            [userDefaults synchronize];
-
-            // Payload of local notification
-            NSMutableDictionary *notificationPayload=[[NSMutableDictionary alloc]init];
-
-            [notificationPayload setValue:conversationTarget forKey:@"vncPeerJid"];
-            [notificationPayload setValue:@"chat" forKey:@"vncEventType"];
-            [notificationPayload setValue:[NSNumber numberWithInt:randomNumber] forKey:@"id"];
-
-            // Content of Notification
-            UNMutableNotificationContent *content = [UNMutableNotificationContent new];
-
-            if ([[vncNotificationPayload objectForKey:@"eType"]  isEqual: @"chat"]) {
-                content.title = senderName;
-            } else {
-
-                if ([vncNotificationPayload objectForKey:@"gt"]) {
-                    content.title = [vncNotificationPayload objectForKey:@"gt"];
-                } else {
-                    content.title = conversationTarget;
-                }
-                content.subtitle = senderName;
-            }
-
-
-            content.threadIdentifier = conversationTarget;
-            content.body = messageContent;
-            content.userInfo = notificationPayload;
-            content.categoryIdentifier = @"GENERAL";
-            content.sound = [UNNotificationSound defaultSound];
-
-            // Trigger of Notification
-            UNTimeIntervalNotificationTrigger *trigger = [UNTimeIntervalNotificationTrigger triggerWithTimeInterval:1
-                                                                                                            repeats:NO];
-
-            // Identifier of Notification
-            NSString *identifier = [NSString stringWithFormat:@"%d", randomNumber];
-
-            // Actually Firing the notification
-            UNNotificationRequest *request = [UNNotificationRequest requestWithIdentifier: identifier
-                                                                                  content:content trigger:trigger];
-
-            [center addNotificationRequest:request withCompletionHandler:^(NSError * _Nullable error) {
-                if (error != nil) {
-                    NSLog(@"[FIREBASE] Something went wrong: %@",error);
-                }
-            }];
-        }
-    }
-
     [FirebasePlugin.firebasePlugin sendNotification:mutableUserInfo];
 }
 
@@ -353,12 +171,15 @@
     [mutableUserInfo setValue:self.applicationInBackground forKey:@"tap"];
 
     // Print full message.
-    NSLog(@"%@", mutableUserInfo);
+    NSLog(@"[FirebasePlugin][userNotificationCenter][willPresentNotification] mutableUserInfo %@", mutableUserInfo);
 
-    completionHandler(UNNotificationPresentationOptionAlert);
     [FirebasePlugin.firebasePlugin sendNotification:mutableUserInfo];
+
+    // Always call the completion handler when done.
+    completionHandler(UNNotificationPresentationOptionNone);
 }
 
+//  Handling the actions in your actionable notifications
 - (void) userNotificationCenter:(UNUserNotificationCenter *)center
  didReceiveNotificationResponse:(UNNotificationResponse *)response
           withCompletionHandler:(void (^)(void))completionHandler
@@ -372,13 +193,44 @@
 
     NSDictionary *mutableUserInfo = [response.notification.request.content.userInfo mutableCopy];
 
-    [mutableUserInfo setValue:@YES forKey:@"tap"];
+    BOOL isCallRejectAction = NO;
+    BOOL isChatAction = NO;
+
+    NSString *categoryIdentifier = response.notification.request.content.categoryIdentifier;
+    NSString *actionIdentifier = response.actionIdentifier;
+    if ([FirebaseActionsManager isVideoAudioCategory:categoryIdentifier]){
+        [FirebaseActionsManager handleCallRequestActions:mutableUserInfo actionIdentifier:actionIdentifier];
+
+        isCallRejectAction = [FirebaseActionsManager isCallRejectActions:mutableUserInfo actionIdentifier:actionIdentifier];
+    } else if ([actionIdentifier isEqual:@"REPLY_MSG_ACTION"]){
+        UNTextInputNotificationResponse *inputResponce = (UNTextInputNotificationResponse *)response;
+        NSString *userText = inputResponce.userText;
+        
+        NSLog(@"[FirebasePlugin][userNotificationCenter][didReceiveNotificationResponse] userText: %@", userText);
+        
+        [FirebaseActionsManager handleChatReplyAction:mutableUserInfo userText:userText];
+        
+        isChatAction = YES;
+    } else if ([actionIdentifier isEqual:@"MARK_AS_READ_ACTION"]){
+        [FirebaseActionsManager handleMarkMessageAsReadAction:mutableUserInfo];
+        
+        isChatAction = YES;
+    } else if ([actionIdentifier isEqual:@"MUTE_CHAT_ACTION"]){
+        [FirebaseActionsManager handleMuteChatAction:mutableUserInfo];
+        
+        isChatAction = YES;
+    }
+
+    // if this is a reject action -> do not pass a 'onNotificationOpen' event to JS
+    if (!isCallRejectAction && !isChatAction) {
+        [mutableUserInfo setValue:@YES forKey:@"tap"];
+        [FirebasePlugin.firebasePlugin sendNotification:mutableUserInfo];
+    }
 
     // Print full message.
-    NSLog(@"Response %@", mutableUserInfo);
+    NSLog(@"[FirebasePlugin][userNotificationCenter][didReceiveNotificationResponse] mutableUserInfo %@, isCallRejectAction: %d", mutableUserInfo, isCallRejectAction);
 
-    [FirebasePlugin.firebasePlugin sendNotification:mutableUserInfo];
-
+    // Always call the completion handler when done.
     completionHandler();
 }
 
